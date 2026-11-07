@@ -3,8 +3,8 @@
 A fork of **[Book card](https://github.com/peterboda236/bookcard.koplugin)** — the KOReader sleep screen that shows a reading summary card — with a redesigned card layout, a two-line progress strip, a star rating, multi-quote highlights with chapter lines, and a **"real book" cover** (spine, page stack and a progress ribbon bookmark) ported from two KOReader user patches.
 
 <p align="center">
-    <img src="docs/card-day.png" width="380" alt="Spined Card, day mode">
-    <img src="docs/card-night.png" width="380" alt="Spined Card, night mode">
+  <img src="docs/card-day.png" width="380" alt="Spined Card, day mode">
+  <img src="docs/card-night.png" width="380" alt="Spined Card, night mode">
 </p>
 
 > **Status:** developed iteratively with an AI assistant (Claude) and tested on a Kindle. It has not been run on every device or KOReader version. Reports are welcome.
@@ -48,14 +48,14 @@ The parents have their own acknowledgements, which carry over:
 
 ## Installation
 
-1. Download the latest `bookcard.koplugin.zip` from the **[Releases](https://github.com/FahdiiiG/spinedcard.koplugin/releases)** page.
-2. Unzip it. You get one folder named `bookcard.koplugin`.
+1. Download the latest `spinedcard.koplugin.zip` from the **[Releases](https://github.com/FahdiiiG/spinedcard.koplugin/releases)** page.
+2. Unzip it. You get one folder named `spinedcard.koplugin`.
 3. Copy that folder to `koreader/plugins/` on your device.
 4. Restart KOReader.
 
-**Important:** the plugin folder keeps the name `bookcard.koplugin`, exactly like the original. This fork **replaces** the original Book card — you cannot have both installed at once. Your existing Book card settings carry over, because the setting names are unchanged.
+**Important:** this plugin lives in its own folder, `spinedcard.koplugin`, and appears as **Spined Card** in the plugin list and under Tools. For compatibility it keeps the original Book card's internal setting names, cache and gesture action, so your existing Book card settings carry over. For the same reason **do not run it together with the original Book card** — remove or disable the original.
 
-If you currently use the original, remove (or overwrite) `koreader/plugins/bookcard.koplugin` first.
+If you currently use the original, delete `koreader/plugins/bookcard.koplugin` (and any earlier test copy) before restarting KOReader.
 
 Android note (inherited from the original): KOReader's own sleep screen only appears on platforms where KOReader owns the "device is asleep" screen (for example Kindle, Kobo). On Android, locking hands control to Android's lock screen, so the sleep screen is not shown.
 
@@ -63,9 +63,9 @@ Android note (inherited from the original): KOReader's own sleep screen only app
 
 ## Using it
 
-- **Set as sleep screen:** Settings → Screen → Sleep screen → Wallpaper → **Book card** (or Tools → Book card → *Use as sleep screen*).
+- **Set as sleep screen:** Settings → Screen → Sleep screen → Wallpaper → **Spined Card** (or Tools → Spined Card → *Use as sleep screen*).
 - Locking **from inside a book** uses live data and refreshes the cache. Locking **from the file manager** uses data cached from the last book you had open; if there is no cache it is rebuilt from the book's sidecar and the statistics database.
-- All settings are under **Tools → Book card**. The new options are mostly in **Card elements**.
+- All settings are under **Tools → Spined Card**. The new options are mostly in **Card elements**.
 - You can assign a gesture to open the menu.
 
 ---
@@ -206,7 +206,7 @@ A ribbon hangs over the cover from the page stack. Its height up the stack and i
 
 ## Settings reference
 
-All paths start at **Tools → Book card**. "Default" is the out-of-the-box value.
+All paths start at **Tools → Spined Card**. "Default" is the out-of-the-box value.
 
 ### Card elements
 | Setting | Default | Notes |
@@ -266,7 +266,7 @@ Prefixes: `bookcard_show_progress_strip`, `bookcard_show_rating`, `bookcard_real
 ### vs. Book card (peterboda236)
 **Everything not listed here is unchanged** — including the settings menu structure, colours, fonts, wallpaper support, cache, PNG export, reading goals, translations, gestures, the About screen and the updater.
 
-*Files changed:* `main.lua`, `lib/bookdata.lua`, `lib/fonts.lua`, `views/card_view.lua`, `widgets/statcell.lua`, `lib/updater.lua` (repository), `views/about.lua` (repository link), `_meta.lua` (version).
+*Files changed:* `main.lua`, `lib/bookdata.lua`, `lib/fonts.lua`, `views/card_view.lua`, `widgets/statcell.lua`, `lib/updater.lua` (repository, plugin id), `lib/screensaver.lua` (sleep-screen entry name), `views/about.lua` (name, repository link), `pluginutil.lua` (comment), `_meta.lua` (name, version, description).
 *Files added:* `lib/realbook.lua`, `icons/authors.svg`, `icons/series.svg`, `icons/star.svg`, `icons/star_outline.svg`.
 
 | Area | Original | This fork |
@@ -288,6 +288,7 @@ Prefixes: `bookcard_show_progress_strip`, `bookcard_show_rating`, `bookcard_real
 | Fonts module | `getFace` ignores sizes whenever a size exists | New helpers `getUnitSize`, `getFaceAt`, `getFaceByName` for exact-size, shrinkable faces |
 | Data (`bookdata.lua`) | One quote, no rating, no chapter data | Quote pool with chapters and positions, rating, chapter pages read/total |
 | Updater / About | Point to the original repository | Point to this repository |
+| Plugin identity | Folder `bookcard.koplugin`, name `bookcard`, shown as "Book card" | Folder `spinedcard.koplugin`, name `spinedcard`, shown as "Spined Card" (internal setting names unchanged) |
 
 ### vs. 2-real-books.lua (ReaLx3m)
 **Taken (re-implemented for one card):** the spine geometry and shear, the angled spine ends, the sheared/rotated label drawn over the cover's own left strip, label text modes, the font-face list, the stack of page lines with page-count tiers, page-line colour/length/thickness/spacing, rounded right corners, cover scale and forced aspect ratio, spine width multiplier.
@@ -327,7 +328,7 @@ Prefixes: `bookcard_show_progress_strip`, `bookcard_show_rating`, `bookcard_real
 
 ## Updating
 
-**Tools → Book card → Updates** checks the latest release of **this** repository, exactly like the original's updater. A release must carry a `.zip` asset whose single top-level folder is `bookcard.koplugin`.
+**Tools → Spined Card → Updates** checks the latest release of **this** repository, exactly like the original's updater. A release must carry a `.zip` asset whose single top-level folder is `spinedcard.koplugin`.
 
 ---
 

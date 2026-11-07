@@ -90,7 +90,7 @@ local function saveLastInstallSource(source) Prefs.save(LAST_INSTALL_SOURCE_SETT
 local function readCheckUpdates() return Prefs.readBool(CHECK_UPDATES_SETTING, false) end
 
 local BookCard = WidgetContainer:extend{
-    name = "bookcard",
+    name = "spinedcard",
     is_doc_only = false,
 }
 
@@ -121,15 +121,15 @@ function BookCard:init()
             end
             if order_module then
                 if order_module.insertSorted then
-                    order_module.insertSorted("tools", "bookcard", TOOLS_SLOT)
+                    order_module.insertSorted("tools", "spinedcard", TOOLS_SLOT)
                 elseif order_module.tools then
                     for i, v in ipairs(order_module.tools) do
-                        if v == "bookcard" then
+                        if v == "spinedcard" then
                             table.remove(order_module.tools, i)
                             break
                         end
                     end
-                    table.insert(order_module.tools, TOOLS_SLOT, "bookcard")
+                    table.insert(order_module.tools, TOOLS_SLOT, "spinedcard")
                 end
             end
         end
@@ -234,7 +234,7 @@ function BookCard:onDispatcherRegisterActions()
     Dispatcher:registerAction("bookcard_preview", {
         category = "none",
         event = "ShowBookCard",
-        title = _("Book card: preview"),
+        title = _("Spined Card: preview"),
         general = true,
     })
 end
@@ -333,7 +333,7 @@ end
 function BookCard:resetToStableRelease()
     local ConfirmBox = require("ui/widget/confirmbox")
     UIManager:show(ConfirmBox:new{
-        text = _("This will clear the development branch setting and install the latest stable release of Book card, then restart KOReader. Continue?"),
+        text = _("This will clear the development branch setting and install the latest stable release of Spined Card, then restart KOReader. Continue?"),
         ok_text = _("Reset"),
         ok_callback = function()
             saveDevBranch("")
@@ -349,7 +349,7 @@ function BookCard:backgroundUpdateCheck()
     if not readCheckUpdates() then return end
     Updater.checkBackground(function(ver)
         local Notification = require("ui/widget/notification")
-        Notification:notify(_("Book card update available: v") .. ver,
+        Notification:notify(_("Spined Card update available: v") .. ver,
             Notification.SOURCE_ALWAYS_SHOW)
     end)
 end
@@ -453,7 +453,7 @@ function BookCard:_imageExportSubItems()
         {
             text = _("On Android, KOReader's own sleep screen (above) never shows, "
                 .. "because locking the screen hands over to Android's own lock "
-                .. "screen instead. Turn this on and Book card keeps a picture of "
+                .. "screen instead. Turn this on and Spined Card keeps a picture of "
                 .. "the card on disk, refreshed automatically; set that picture as "
                 .. "your Android wallpaper the normal way (from the Photos/Gallery "
                 .. "app, or a wallpaper-changer app pointed at the folder below)."),
@@ -728,8 +728,8 @@ function BookCard:addToMainMenu(menu_items)
     -- CardView (see M.buildStatisticsMenu / M.getStatOrder there), so the
     -- reader can rearrange them from the "Reorder" entry in that submenu.
 
-    menu_items.bookcard = {
-        text = _("Book card"),
+    menu_items.spinedcard = {
+        text = _("Spined Card"),
         sorting_hint = "tools",
         sub_item_table = {
             {

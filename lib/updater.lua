@@ -38,10 +38,10 @@ local Locale =
 local _ = Locale._
 
 -- Releases must carry a .zip asset whose single top-level folder is
--- bookcard.koplugin.
+-- spinedcard.koplugin.
 local GITHUB_REPO = "FahdiiiG/spinedcard.koplugin"   -- set by finalize.sh
-local PLUGIN_ID    = "bookcard.koplugin"
-local UA_PRODUCT   = "KOReader-BookCard"
+local PLUGIN_ID    = "spinedcard.koplugin"
+local UA_PRODUCT   = "KOReader-SpinedCard"
 
 local Updater = {}
 
@@ -327,7 +327,7 @@ function Updater.check(on_success)
 
         if #new_releases == 0 then
             UIManager:show(InfoMessage:new{
-                text = _("Book card is up to date.") .. "\n\n" ..
+                text = _("Spined Card is up to date.") .. "\n\n" ..
                     _("Version: ") .. "v" .. installed_version,
                 timeout = 3,
             })
@@ -487,7 +487,7 @@ function Updater.install(zip_url, old_version, new_version, on_success, error_la
 
         -- Restart KOReader to load the new version
         UIManager:show(ConfirmBox:new{
-            text = _("Book card updated to v") .. new_version .. ".\n\n" ..
+            text = _("Spined Card updated to v") .. new_version .. ".\n\n" ..
                 _("Restart KOReader now?"),
             ok_text = _("Restart"),
             ok_callback = function()

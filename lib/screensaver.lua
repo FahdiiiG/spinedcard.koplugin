@@ -207,7 +207,7 @@ function M.patchMenu()
         if type(path) == "string" and path:match("ui/elements/screensaver_menu%.lua$")
                 and type(result) == "table" then
             local entry = {
-                text = _("Book card"),
+                text = _("Spined Card"),
                 keep_menu_open = true,
                 radio = true,
                 checked_func = M.isSelected,

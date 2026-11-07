@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+- Plugin is now its own plugin: folder `spinedcard.koplugin`, internal name `spinedcard`, shown as "Spined Card" in the plugin list, the Tools menu, the sleep-screen list and the About screen.
+- The updater now uses `spinedcard.koplugin` and its own user-agent, so store front / plugin managers no longer match it to the original Book card.
+- Internal setting names, cache and gesture action are unchanged, so settings carry over. Do not run it together with the original Book card.
+
 ## 1.0.0 — first release of Spined Card
 Forked from Book card 1.7.8 (peterboda236); this project starts its own numbering at 1.0.0.
 

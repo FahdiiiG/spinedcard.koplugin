@@ -1,7 +1,7 @@
 --[[
 Book card - shared plugin bootstrap helper.
 
-The plugin's own files live in <koreader>/plugins/bookcard.koplugin/, which is
+The plugin's own files live in <koreader>/plugins/spinedcard.koplugin/, which is
 NOT on package.path, so require() cannot find sibling files. This module
 centralises the two things every file needs:
 
