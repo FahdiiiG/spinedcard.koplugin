@@ -2,8 +2,10 @@
 
 A fork of **[Book card](https://github.com/peterboda236/bookcard.koplugin)** — the KOReader sleep screen that shows a reading summary card — with a redesigned card layout, a two-line progress strip, a star rating, multi-quote highlights with chapter lines, and a **"real book" cover** (spine, page stack and a progress ribbon bookmark) ported from two KOReader user patches.
 
-<!-- Add your own screenshots here, e.g.
-![Card, day](docs/card-day.png) ![Card, night](docs/card-night.png) -->
+<p align="center">
+    <img src="docs/card-day.png" width="380" alt="Spined Card, day mode">
+    <img src="docs/card-night.png" width="380" alt="Spined Card, night mode">
+</p>
 
 > **Status:** developed iteratively with an AI assistant (Claude) and tested on a Kindle. It has not been run on every device or KOReader version. Reports are welcome.
 
