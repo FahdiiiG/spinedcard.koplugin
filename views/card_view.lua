@@ -38,6 +38,7 @@ local Cache     = deps.Cache
 local Colors    = deps.Colors
 local Fonts     = deps.Fonts
 local Wallpaper = deps.Wallpaper
+local RealBook  = deps.RealBook
 
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
@@ -45,6 +46,7 @@ local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local FrameContainer = require("ui/widget/container/framecontainer")
+local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
@@ -52,6 +54,7 @@ local DoubleSpinWidget = require("ui/widget/doublespinwidget")
 local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LineWidget = require("ui/widget/linewidget")
+local LeftContainer = require("ui/widget/container/leftcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local SortWidget = require("ui/widget/sortwidget")
 local Size = require("ui/size")
@@ -60,6 +63,7 @@ local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
+local VerticalSpan = require("ui/widget/verticalspan")
 local logger = require("logger")
 local Screen = Device.screen
 
@@ -76,6 +80,10 @@ local M = {}
 M.SETTING_BATTERY     = "bookcard_show_battery"          -- default on
 M.SETTING_STREAK      = "bookcard_show_streak"           -- default on
 M.SETTING_READER_TYPE = "bookcard_show_reader_type"      -- default on
+M.SETTING_PROGRESS_STRIP = "bookcard_show_progress_strip"  -- default on
+M.SETTING_RATING      = "bookcard_show_rating"           -- default on
+M.SETTING_REAL_BOOK   = "bookcard_real_book"             -- default on: cover drawn like a physical book (lib/realbook.lua)
+M.SETTING_SPINE_TEXT  = "bookcard_spine_text"            -- "title" (default) | "author_title" | "title_author" | "filename"
 M.SETTING_ROUNDED     = "bookcard_rounded_corners"       -- default on
 M.SETTING_THEME       = "bookcard_theme"                 -- "auto" (default) | "light" | "dark"
 M.SETTING_GAP         = "bookcard_cover_stats_gap"       -- "small" (default) | "large"
@@ -88,17 +96,19 @@ M.SETTING_QUOTE        = "bookcard_show_quote"           -- default OFF - a
                                                           -- random highlighted
                                                           -- quote under
                                                           -- title/author/series
-M.SETTING_QUOTE_LINES  = "bookcard_quote_max_lines"      -- 1..5, default 2 - maximum
+M.SETTING_QUOTE_LINES  = "bookcard_quote_max_lines"      -- 1..10, default 2 - maximum
                                                           -- number of lines the quote
                                                           -- may take (it only uses as
                                                           -- many as the text needs)
 M.QUOTE_LINES_DEFAULT  = 2
-M.QUOTE_LINES_OPTIONS  = { 1, 2, 3, 4, 5 }
+M.QUOTE_LINES_OPTIONS  = { 1, 2, 3, 4, 5 }      -- quick picks; "Custom" accepts 1..QUOTE_LINES_MAX
+M.QUOTE_LINES_MAX      = 10
 
 function M.getQuoteMaxLines()
     local n = tonumber(Prefs.read(M.SETTING_QUOTE_LINES, M.QUOTE_LINES_DEFAULT))
     n = n and math.floor(n) or M.QUOTE_LINES_DEFAULT
-    if n < 1 or n > 5 then n = M.QUOTE_LINES_DEFAULT end
+    if n < 1 then n = M.QUOTE_LINES_DEFAULT end
+    if n > M.QUOTE_LINES_MAX then n = M.QUOTE_LINES_MAX end   -- 15, 17... -> 10
     return n
 end
 
@@ -275,6 +285,25 @@ end
 
 -- `max_w` x `max_h` is the box for the OUTER size (frame included).
 -- Returns the widget and its outer width and height.
+function M.getSpineTextMode()
+    local m = Prefs.read(M.SETTING_SPINE_TEXT, "title")
+    if m ~= "author_title" and m ~= "title_author" and m ~= "filename" then m = "title" end
+    return m
+end
+
+-- Text running up the spine of the "real book" cover.
+function M.spineText(card)
+    local mode = M.getSpineTextMode()
+    local title = (card.title and card.title ~= "") and card.title or nil
+    local author = (card.authors and card.authors ~= "") and card.authors or nil
+    local fname = card.file and card.file:match("([^/]+)$")
+    fname = fname and fname:gsub("%.[^%.]+$", "") or nil
+    if mode == "filename" then return fname or title or "" end
+    if mode == "author_title" and author and title then return author .. " \u{2013} " .. title end
+    if mode == "title_author" and author and title then return title .. " \u{2013} " .. author end
+    return title or author or fname or ""
+end
+
 local function buildCover(card, max_w, max_h, pal, shadow_offset, restore)
     -- Frame thickness as in Reading insights: a 1 px line (or none).
     local border = Prefs.readBool(M.SETTING_COVER_BORDER, true) and 1 or 0
@@ -303,6 +332,28 @@ local function buildCover(card, max_w, max_h, pal, shadow_offset, restore)
             local RenderImage = require("ui/renderimage")
             local bb = RenderImage:renderImageFile(Cache.coverPath(), false, nil, nil)
             if not bb then error("cover could not be decoded") end
+            -- "Real book" look: spine with the book's name, page lines on top.
+            if RealBook and Prefs.readBool(M.SETTING_REAL_BOOK, true) then
+                local rb, rw, rh = RealBook.render(bb, max_w, max_h, {
+                    name = M.spineText(card), pages = card.total_pages, bg = pal.bg,
+                    progress = card.percent and (card.percent / 100) or nil,
+                    finished = (card.status == "complete") or (card.finished == true),
+                    night = Screen.night_mode == true, flip = pal.flip, dark = pal.dark,
+                })
+                if rb then
+                    bb:free()
+                    local rimg = ImageWidget:new{
+                        image = rb, image_disposable = true,
+                        width = rw, height = rh, scale_factor = 0,
+                        -- "Follow night mode" on: the bitmap was painted for the
+                        -- panel's own night inversion (cover pre-inverted), so the
+                        -- widget must not invert it again; off: it does.
+                        original_in_nightmode = not RealBook.followsNightMode(),
+                    }
+                    rimg:getSize()
+                    return rimg, rw, rh
+                end
+            end
             local scale = math.min(box_w / bb:getWidth(), box_h / bb:getHeight())
             local iw = math.max(1, math.floor(bb:getWidth() * scale))
             local ih = math.max(1, math.floor(bb:getHeight() * scale))
@@ -362,7 +413,7 @@ local STAT_DEFS = {
         id = "progress", setting = M.SETTING_STAT_PROGRESS, default = true,
         label = function() return _("Progress") end,
         build = function(card, ctx)
-            return { ctx.percent and (tostring(ctx.percent) .. "%") or DASH, _("Progress") }
+            return { ctx.percent and (tostring(ctx.percent) .. "%") or DASH, _("Progress"), bar = ctx.percent }
         end,
     },
     {
@@ -449,22 +500,10 @@ local STAT_DEFS = {
         id = "started", setting = M.SETTING_STAT_STARTED, default = true,
         label = function() return _("Started") end,
         build = function(card, ctx)
-            local span = card.span_days
-            local started = Locale.shortDate(card.started_ts)
-            local span_text = DASH
-            if span then
-                if span == 0 then
-                    span_text = _("Today")
-                elseif span == 1 then
-                    span_text = _("Yesterday")
-                else
-                    span_text = string.format(N_("%d day ago", "%d days ago", span), span)
-                end
-            end
-            return {
-                span_text,
-                started and Locale.tpl(_("Started {date}"), { date = started }) or _("Started"),
-            }
+            -- Label "Started", value = the date, e.g. "Sat, 07 Nov, 2026"
+            -- (same format as the date at the top of the card).
+            local started = card.started_ts and os.date("%a, %d %b, %Y", card.started_ts) or DASH
+            return { started, _("Started") }
         end,
     },
     {
@@ -813,21 +852,25 @@ function M.build(card, opts)
         for _i, m in ipairs(group.members) do place(m.widget, m.x, m.y) end
     end
 
-    -- Battery, top right: KOReader's own battery glyph + percentage, same
-    -- symbol the stock footer/screensaver use (Device:getPowerDevice():
-    -- getBatterySymbol), so it matches the device's native battery icon.
+    -- Top row: date on the left (e.g. "Sat, 07 Nov, 2026"), battery on the
+    -- right as "80% <glyph>" (percentage first, KOReader's own battery glyph
+    -- last - same symbol the stock footer/screensaver use). Both share the
+    -- "battery" font and colour settings.
     local battery_h = 0
+    local top_face = Fonts.getFace("battery", 14)
+    local top_color = Colors.getColor("battery", pal.fg)
+    local date_text = text(os.date("%a, %d %b, %Y"), top_face, top_color)
+    battery_h = date_text:getSize().h
+    placeText(date_text, pad_x, pad_top)
     if show_battery then
         local powerd = Device:getPowerDevice()
         local ok, capacity = pcall(function() return powerd:getCapacity() end)
         if ok and capacity then
-            local battery_color = Colors.getColor("battery", pal.fg)
-            local pct_face = Fonts.getFace("battery", 14)
             local batt_symbol = powerd:getBatterySymbol(
                 powerd:isCharged(), powerd:isCharging(), capacity)
-            local pct_text = text(batt_symbol .. capacity .. "%", pct_face, battery_color)
+            local pct_text = text(capacity .. "% " .. batt_symbol, top_face, top_color)
             local size = pct_text:getSize()
-            battery_h = size.h
+            battery_h = math.max(battery_h, size.h)
             placeText(pct_text, W - pad_x - size.w, pad_top)
         end
     end
@@ -868,7 +911,7 @@ function M.build(card, opts)
         end
     end
     if reader_row then bottom_h = math.max(bottom_h, line_h) end
-    local content_bottom = H - pad_bottom - bottom_h - (bottom_h > 0 and S(18) or 0)
+    local content_bottom = H - pad_bottom - bottom_h - (bottom_h > 0 and S(6) or 0)
 
     if streak_row then
         placeText(streak_row, pad_x, H - pad_bottom - bottom_h
@@ -886,6 +929,34 @@ function M.build(card, opts)
     local stats_top = pad_top + (battery_h > 0 and (battery_h + S(10)) or 0)
     local stats_h_for_fonts = content_bottom - stats_top
     local rows = statRows(card)
+    -- Progress strip under the cover (side layout only), two lines (see below).
+    -- Independent of the right-hand Progress / Pages stats - those stay in the
+    -- column as they are. Turn the strip off under Card elements.
+    local strip_on = Prefs.readBool(M.SETTING_PROGRESS_STRIP, true)
+        and Prefs.read(M.SETTING_LAYOUT, "side") ~= "centered"
+    -- Two-line strip: line 1 = pages read/total (left) for chapter | book,
+    -- line 2 = progress bars. Chapter figures fall back to the book's when
+    -- there is no chapter TOC data (or no live document).
+    local strip_ch_txt, strip_bk_txt, strip_ch_pct
+    local strip_bk_pct = card.percent or 0
+    if strip_on then
+        local function r(x) return math.floor((tonumber(x) or 0) + 0.5) end
+        local bk_read, bk_total = card.current_page, card.total_pages
+        if bk_read and bk_total then
+            strip_bk_txt = string.format("%d/%d (%d)", r(bk_read), r(bk_total), math.max(0, r(bk_total) - r(bk_read)))
+        else
+            strip_bk_txt = DASH
+        end
+        local ch_read, ch_total = card.chapter_pages_read, card.chapter_pages_total
+        if not (ch_read and ch_total) then ch_read, ch_total = bk_read, bk_total end
+        if ch_read and ch_total then
+            strip_ch_txt = string.format("%d/%d (%d)", r(ch_read), r(ch_total), math.max(0, r(ch_total) - r(ch_read)))
+            strip_ch_pct = ch_total > 0 and math.floor(100 * r(ch_read) / r(ch_total) + 0.5) or 0
+        else
+            strip_ch_txt = DASH
+            strip_ch_pct = card.percent or 0
+        end
+    end
     local budget = stats_h_for_fonts / math.max(1, #rows) / dp     -- units per row
     local value_size = math.min(22, budget * 0.42)
     local label_size = math.min(13, budget * 0.24)
@@ -893,6 +964,20 @@ function M.build(card, opts)
     local label_face = Fonts.getFace("stat_label", label_size)
     local stat_value_color = Colors.getColor("stat_value", pal.fg)
     local stat_label_color = Colors.getColor("stat_label", pal.fg)
+
+    -- Strip under the cover: font = the bold stat-value font at 75% size
+    -- (change 0.75 to make the text bigger/smaller), bar 10 units tall.
+    -- The face is shrunk later, once the cover's width is known, if the
+    -- page counts would not fit.
+    local strip_size = Fonts.getUnitSize("stat_value")      -- shrinks to fit below
+    local strip_face = Fonts.getFaceAt("stat_value", strip_size)
+    local strip_bar_h = S(10)
+    local strip_line_gap = 0
+    local strip_h = 0
+    if strip_ch_txt then
+        local line_h = math.max(TextWidget:new{ text = "Ag", face = strip_face }:getSize().h, strip_bar_h)
+        strip_h = 2 * line_h - math.floor(line_h * 0.2)   -- line 1 trimmed, see strip build
+    end
 
     local right_w = 0
     for _idx, row in ipairs(rows) do
@@ -979,7 +1064,33 @@ function M.build(card, opts)
     -- Returns the block list and the index of the quote block within it
     -- (nil if there is no quote), so callers can single out the (larger)
     -- gap above the quote from the gaps between title/author/series.
-    local function buildTextBlocks(max_w, clamp_quote)
+    -- Icon + single line of text, shrinking the font (1 unit at a time, down
+    -- to 3 - effectively no limit) until icon + text fit in max_w.
+    local function fitIconLine(face_name, start_size, icon_name, txt, max_w, color)
+        local size = start_size
+        local face, ic, gap, tw
+        while true do
+            face = Fonts.getFaceAt(face_name, size)
+            local isz = math.floor(face.size * 1.1)
+            ic = icon(icon_name, isz, pal)
+            gap = ic and math.floor(isz * 0.35) or 0
+            local avail = max_w - (ic and (isz + gap) or 0)
+            tw = TextWidget:new{ text = txt, face = face }
+            if tw:getSize().w <= avail or size <= 3 then
+                tw = text(txt, face, color, math.max(1, avail))
+                break
+            end
+            size = size - 1
+        end
+        if not ic then return tw end
+        local row = HorizontalGroup:new{ align = "center" }
+        table.insert(row, ic)
+        table.insert(row, HorizontalSpan:new{ width = gap })
+        table.insert(row, tw)
+        return row
+    end
+
+    local function buildTextBlocks(max_w, clamp_quote, full_width, quote_lines)
         local quote_max_w = (grouped_backdrop_showing or clamp_quote) and max_w or quote_full_w
         -- TextBoxWidget (needed here for wrapping across up to 2 lines,
         -- unlike the single-line TextWidget the rest of the card's text
@@ -995,74 +1106,209 @@ function M.build(card, opts)
             text = card.title or "",
             face = title_face,
             width = max_w,
-            height = 2 * title_line_h,
+            height = (full_width and 2 or 4) * title_line_h,
             height_adjust = true,
             height_overflow_show_ellipsis = true,
             alignment = "left",
+            justified = true,
             fgcolor = wallpaper_bg and Blitbuffer.COLOR_BLACK or title_color,
             bgcolor = wallpaper_bg and Blitbuffer.COLOR_WHITE or pal.bg,
         }
         title_w = Wallpaper.mask(wallpaper_bg ~= nil, title_w, title_color)
         local blocks = { title_w }
         if card.authors and card.authors ~= "" then
-            blocks[#blocks + 1] = text(card.authors, author_face, author_color, max_w)
+            -- Forced onto ONE line: the font shrinks until it fits.
+            local author_row = fitIconLine("author", Fonts.getUnitSize("author"), "authors", card.authors, max_w, author_color)
+            blocks[#blocks + 1] = author_row
         end
         if card.series and card.series ~= "" then
             local line = card.series
             if card.series_index then
-                line = Locale.tpl(_("{series} / #{index}"), { series = card.series, index = card.series_index })
+                local idx_num = tonumber(card.series_index)
+                local idx_txt
+                if not idx_num then
+                    idx_txt = tostring(card.series_index)
+                elseif idx_num == math.floor(idx_num) then
+                    idx_txt = string.format("%02d", idx_num)      -- 1    -> 01
+                else
+                    idx_txt = string.format("%05.2f", idx_num)    -- 0.7  -> 00.70
+                end
+                line = card.series .. " #" .. idx_txt
             end
-            blocks[#blocks + 1] = text(line, series_face, series_color, max_w)
+            -- Forced onto ONE line: the font shrinks until it fits.
+            blocks[#blocks + 1] = fitIconLine("series", Fonts.getUnitSize("series"), "series", line, max_w, series_color)
         end
 
-        -- Random highlighted quote (opt-in: "Card elements > Highlighted
-        -- quote", default off). Appended to `blocks` below, so from that
-        -- point on title, author, series and the quote are one and the same
-        -- block: the same shared backdrop panel in "grouped" mode, the same
-        -- left edge - never a separate box. Nothing is added (and the cover
-        -- stays its normal size) unless the setting is on AND this
-        -- particular book actually has a quote to show.
+        -- Highlighted quotes (opt-in: "Card elements > Highlighted quote").
+        -- The quote area is exactly `quote_max_lines` lines tall (the layout
+        -- reserves that much, no more). It is filled with as many COMPLETE
+        -- quotes as fit: candidates are measured at the real width, then
+        -- random combinations are tried and the one leaving the fewest empty
+        -- lines wins. Only when not even one whole quote fits is a single
+        -- quote shown, cut off with "..." on its last line. Several quotes
+        -- never end in "...".
         local quote_idx = nil
-        if Prefs.readBool(M.SETTING_QUOTE, false) then
-            local quote_text = card.quote_text
-            if type(quote_text) == "string" and quote_text:match("%S") then
+        local quote_max_lines = quote_lines or M.getQuoteMaxLines()   -- 0 = leave the quote out
+        if Prefs.readBool(M.SETTING_QUOTE, false) and quote_max_lines > 0 then
+            local pool = {}      -- { text = "...", chap = "Name" | nil, ord = position in the book }
+            -- What follows "Chapter:" on the chapter line. A real chapter name is
+            -- shown as it is; a bare "Chapter 5" becomes just "5" (so the line
+            -- reads "Chapter: 5", not "Chapter: Chapter 5"). Older cached cards
+            -- may still hold "Chapter 07: Name" - that becomes "Name".
+            local function chapterDisplayName(c)
+                local n = c:gsub("^Chapter%s+%d+%s*[:%.%-]?%s*", "")
+                if n == "" then n = c end
+                n = n:gsub("^[Cc]hapter%s+", "")
+                return n ~= "" and n or c
+            end
+            local src = type(card.quote_texts) == "table" and card.quote_texts or { card.quote_text }
+            local chaps = type(card.quote_texts) == "table" and card.quote_chapters or nil
+            local orders = type(card.quote_texts) == "table" and card.quote_orders or nil
+            for i, t in ipairs(src) do
+                if type(t) == "string" and t:match("%S") then
+                    local c = chaps and chaps[i]
+                    pool[#pool + 1] = {
+                        text = "\u{201C}" .. stripOuterQuotes((t:gsub("%s+", " "))) .. "\u{201D}",
+                        chap = (quote_max_lines >= 2 and type(c) == "string" and c ~= "")
+                            and chapterDisplayName(c) or nil,   -- no room for it at 1 line
+                        ord = tonumber(orders and orders[i]) or i,
+                    }
+                end
+            end
+            if #pool > 0 then
                 local quote_face = Fonts.getFace("quote", label_size)
                 local quote_color = Colors.getColor("quote", author_color)
                 local quote_line_h = math.floor((1 + 0.3) * quote_face.size + 0.5)
                 local quote_bar_w = S(2)
                 local quote_gap_w = S(6)
-                Prefs.save("bookcard_last_quote", quote_text)
-                local quote_clean = stripOuterQuotes(quote_text:gsub("%s+", " "))
-                local quote_widget = TextBoxWidget:new{
-                    text = "\u{201C}" .. quote_clean .. "\u{201D}",
-                    face = quote_face,
-                    width = quote_max_w - quote_bar_w - quote_gap_w,
-                    height = M.getQuoteMaxLines() * quote_line_h,
-                    height_adjust = true,
-                    height_overflow_show_ellipsis = true,
-                    alignment = "left",
-                    fgcolor = wallpaper_bg and Blitbuffer.COLOR_BLACK or quote_color,
-                    bgcolor = wallpaper_bg and Blitbuffer.COLOR_WHITE or pal.bg,
-                }
-                quote_widget = Wallpaper.mask(wallpaper_bg ~= nil, quote_widget, quote_color)
-                -- Bar spans exactly the quote's own (measured) height, so it
-                -- runs the full length of however many lines the quote wraps
-                -- to - no more, no less. Always quote_color (never forced
-                -- black): unlike the text above, this bar is painted
-                -- directly, not through Wallpaper.mask, so a hardcoded
-                -- black here would ignore the night/dark theme whenever a
-                -- wallpaper is active.
-                local quote_bar = LineWidget:new{
-                    background = quote_color,
-                    dimen = Geom:new{ w = quote_bar_w, h = quote_widget:getSize().h },
-                }
-                blocks[#blocks + 1] = HorizontalGroup:new{
-                    align = "top",
-                    quote_bar,
-                    HorizontalSpan:new{ width = quote_gap_w },
-                    quote_widget,
-                }
-                quote_idx = #blocks
+                local text_w = quote_max_w - quote_bar_w - quote_gap_w
+                local function newQuoteBox(txt, n_lines)
+                    return TextBoxWidget:new{
+                        text = txt,
+                        face = quote_face,
+                        width = text_w,
+                        height = n_lines and (n_lines * quote_line_h) or nil,
+                        height_adjust = n_lines and true or nil,
+                        height_overflow_show_ellipsis = true,
+                        alignment = "left",
+                        justified = true,
+                        fgcolor = wallpaper_bg and Blitbuffer.COLOR_BLACK or quote_color,
+                        bgcolor = wallpaper_bg and Blitbuffer.COLOR_WHITE or pal.bg,
+                    }
+                end
+                -- One quote = one "unit": the quote text with its chapter line
+                -- right underneath, both beside ONE left bar. Units are stacked
+                -- with a visible gap between them. All heights are measured in
+                -- pixels: the quote box gives back the blank space under its last
+                -- line (so the chapter line sits close to its quote), and the gap
+                -- after the chapter line is what separates it from the next one.
+                local qtrim = math.floor(quote_line_h * 0.2)
+                local unit_gap = S(10)
+                local area_h = quote_max_lines * quote_line_h
+                local function newChapterLine(name)
+                    local label = "Chapter: " .. name
+                    local csize = Fonts.getUnitSize("quote")
+                    local ctext
+                    repeat
+                        ctext = TextWidget:new{
+                            text = label,
+                            face = Fonts.getFaceByName("NotoSans-Italic.ttf", csize),
+                            fgcolor = quote_color,
+                        }
+                        csize = csize - 1
+                    until ctext:getSize().w <= text_w or csize < 6
+                    -- A TextWidget clips what sticks out below its own box, which
+                    -- cut the tail off the italic "p" of "Chapter". Same text, with
+                    -- a taller box (the baseline stays where it was).
+                    local face_used = ctext.face
+                    ctext = TextWidget:new{
+                        text = label,
+                        face = face_used,
+                        fgcolor = quote_color,
+                        forced_height = ctext:getSize().h + S(3),
+                    }
+                    return VerticalGroup:new{
+                        align = "left",
+                        ctext,
+                        LineWidget:new{
+                            background = quote_color,
+                            dimen = Geom:new{ w = math.min(ctext:getSize().w, text_w), h = math.max(1, S(1)) },
+                        },
+                    }
+                end
+                for _i, q in ipairs(pool) do
+                    local w = newQuoteBox(q.text, nil)
+                    q.lines = math.max(1, math.floor(w:getSize().h / quote_line_h + 0.5))
+                    pcall(function() w:free() end)
+                    q.chap_w = q.chap and newChapterLine(q.chap) or nil
+                    q.trim = q.chap_w and qtrim or 0
+                    q.h = q.lines * quote_line_h - q.trim + (q.chap_w and q.chap_w:getSize().h or 0)
+                end
+                -- Best combination out of a number of random orders: the one
+                -- that leaves the least empty room in the quote area.
+                local best, best_left = nil, math.huge
+                local order = {}
+                for i = 1, #pool do order[i] = i end
+                for attempt = 1, 40 do
+                    if attempt > 1 then
+                        for i = #order, 2, -1 do
+                            local j = math.random(i)
+                            order[i], order[j] = order[j], order[i]
+                        end
+                    end
+                    local used, chosen = 0, {}
+                    for _k, idx in ipairs(order) do
+                        local add = pool[idx].h + (#chosen > 0 and unit_gap or 0)
+                        if used + add <= area_h then
+                            chosen[#chosen + 1] = idx
+                            used = used + add
+                        end
+                    end
+                    local left = area_h - used
+                    if #chosen > 0 and left < best_left then
+                        best, best_left = chosen, left
+                        if left < quote_line_h * 0.5 then break end
+                    end
+                end
+                local truncated = false
+                if not best then best, truncated = { 1 }, true end   -- every quote is too long: cut one
+                Prefs.save("bookcard_last_quote", (card.quote_texts and card.quote_texts[1]) or card.quote_text)
+                -- Show the chosen quotes in reading order: earlier pages first.
+                table.sort(best, function(x, y) return pool[x].ord < pool[y].ord end)
+                for k, idx in ipairs(best) do
+                    local q = pool[idx]
+                    local n = q.lines
+                    if truncated then
+                        local ch_h = q.chap_w and q.chap_w:getSize().h or 0
+                        n = math.max(1, math.floor((area_h - ch_h + q.trim) / quote_line_h))
+                    end
+                    local quote_widget = newQuoteBox(q.text, n)
+                    quote_widget = Wallpaper.mask(wallpaper_bg ~= nil, quote_widget, quote_color)
+                    local qbox = quote_widget
+                    if q.trim > 0 then
+                        qbox = WidgetContainer:new{
+                            dimen = Geom:new{ w = text_w, h = quote_widget:getSize().h - q.trim },
+                            quote_widget,
+                        }
+                    end
+                    local content = VerticalGroup:new{ align = "left", qbox }
+                    if q.chap_w then table.insert(content, q.chap_w) end
+                    -- The bar spans the quote AND its chapter line.
+                    local row = HorizontalGroup:new{
+                        align = "top",
+                        LineWidget:new{
+                            background = quote_color,
+                            dimen = Geom:new{ w = quote_bar_w, h = math.max(1, content:getSize().h) },
+                        },
+                        HorizontalSpan:new{ width = quote_gap_w },
+                        content,
+                    }
+                    if k < #best then
+                        row = VerticalGroup:new{ align = "left", row, VerticalSpan:new{ width = unit_gap } }
+                    end
+                    blocks[#blocks + 1] = row
+                    quote_idx = quote_idx or #blocks
+                end
             end
         end
         return blocks, quote_idx
@@ -1098,6 +1344,7 @@ function M.build(card, opts)
         end
         local function gapBeforeC(i, quote_idx)
             if i <= 1 then return 0 end
+            if quote_idx and i > quote_idx then return 0 end    -- quotes stack with no gap
             return (quote_idx and i == quote_idx) and text_block_gap_c or header_gap_c
         end
 
@@ -1114,9 +1361,14 @@ function M.build(card, opts)
         -- just "value line + label line" stacked, left-aligned - same
         -- metrics as the single-column layout's rows, without StatCell's
         -- right-alignment.
+        local underline_h = math.max(1, S(1))
         local cell_h = TextWidget:new{ text = "Ag", face = value_face }:getSize().h
                      + TextWidget:new{ text = "Ag", face = label_face }:getSize().h
-        local grid_row_gap = math.max(S(8), math.floor(col_gap / 2))
+                     + underline_h
+        local has_bar = false
+        for _i, r in ipairs(rows) do if r.bar then has_bar = true end end
+        if has_bar then cell_h = cell_h + StatCell.BAR_GAP() + StatCell.BAR_H() end
+        local grid_row_gap = math.max(S(16), col_gap)
         local grid_cols = math.min(M.getGridColumns(), math.max(#rows, 1))
         local grid_rows_n = math.ceil(#rows / grid_cols)
         local grid_h = grid_rows_n > 0 and (grid_rows_n * cell_h + (grid_rows_n - 1) * grid_row_gap) or 0
@@ -1208,11 +1460,24 @@ function M.build(card, opts)
             -- edges instead of reaching all the way to the cover's edge.
             local col_w = math.floor((text_max_w_c - (grid_cols - 1) * grid_col_gap) / grid_cols)
             local function statCellWidget(row)
-                return VerticalGroup:new{
+                local label_w = TextWidget:new{ text = row[2], face = label_face, fgcolor = stat_label_color, max_width = col_w }
+                local cell_group = VerticalGroup:new{
                     align = "left",
+                    label_w,
+                    LineWidget:new{
+                        background = stat_label_color,
+                        dimen = Geom:new{ w = label_w:getSize().w, h = underline_h },
+                    },
                     TextWidget:new{ text = row[1], face = value_face, fgcolor = stat_value_color, max_width = col_w },
-                    TextWidget:new{ text = row[2], face = label_face, fgcolor = stat_label_color, max_width = col_w },
                 }
+                if row.bar then
+                    table.insert(cell_group, VerticalSpan:new{ width = StatCell.BAR_GAP() })
+                    table.insert(cell_group, StatCell.Bar:new{
+                        width = col_w, height = StatCell.BAR_H(),
+                        percent = row.bar, color = stat_value_color,
+                    })
+                end
+                return cell_group
             end
             if backdrop_grouped then
                 -- One panel behind the whole grid (all rows, all columns).
@@ -1264,7 +1529,11 @@ function M.build(card, opts)
     else
     -- First pass, at the full left-column width, just to measure the
     -- stack's height for the cover-sizing math below.
-    local text_blocks, quote_index = buildTextBlocks(left_w)
+    -- The title / author / series / quote stack is one box spanning the
+    -- whole card width, below the cover + progress strip (the stats column
+    -- on the right ends level with the strip, so nothing sits beside it).
+    local text_max_w = W - 2 * pad_x - (backdrop_active and 2 * TEXT_BACKDROP_PAD_H or 0)
+    local text_blocks, quote_index = buildTextBlocks(text_max_w, false, true)
 
     -- Gap between title/author/series, and the (separate, larger) gap
     -- above the quote. The tiered spacing below - tight lines, quote held
@@ -1297,7 +1566,11 @@ function M.build(card, opts)
         -- or - with 3 * TEXT_BACKDROP_PAD_V eaten by the panel reaching toward
         -- itself around the quote - whichever of the two is larger, so the
         -- panel never overlaps itself.
-        text_block_gap = math.max(3 * header_gap_base, 3 * TEXT_BACKDROP_PAD_V + S(4))
+        if backdrop_active then
+            text_block_gap = math.max(3 * header_gap_base, 3 * TEXT_BACKDROP_PAD_V + S(4))
+        else
+            text_block_gap = S(4)      -- no panel to keep apart: gap above the quote kept minimal
+        end
         -- Gap between title/author/series - set directly in (unscaled)
         -- pixels here, rather than as a fraction of text_block_gap: that
         -- value is only ~6-15px to begin with, so dividing it by anything
@@ -1309,12 +1582,19 @@ function M.build(card, opts)
     end
     local function gapBefore(i)
         if i <= 1 then return 0 end
+        if quote_index and i > quote_index then return 0 end     -- quotes stack with no gap
         return (quote_index and i == quote_index) and text_block_gap or header_gap
     end
 
+    -- Height of title/author/series only: the quote is deliberately NOT
+    -- counted, so it never changes the cover's size or the position of
+    -- anything above it - it just fills whatever room is left underneath
+    -- (and is cut down to fewer lines only if that room runs out).
     local text_h = 0
     for i, block in ipairs(text_blocks) do
-        text_h = text_h + block:getSize().h + gapBefore(i)
+        if not quote_index or i < quote_index then
+            text_h = text_h + block:getSize().h + gapBefore(i)
+        end
     end
 
     -- The cover starts level with the first statistic (Progress), not with
@@ -1331,59 +1611,158 @@ function M.build(card, opts)
     -- own by however much text_h grows, whether that's from the quote
     -- being on or from a long-enough title/author wrapping onto extra
     -- lines.
-    local cover_max_h = math.max(S(80), content_bottom - cover_top - text_h - text_block_gap - shadow_off)
+    -- Room for a full quote is reserved up front (when "Show quote" is on):
+    -- the configured maximum number of lines plus the gap above it. So the
+    -- cover, strip, stats, rating and title block are sized to always leave
+    -- that much space, whether or not this book has a quote or how long it is.
+    local quote_reserve = 0
+    if Prefs.readBool(M.SETTING_QUOTE, false) then
+        local qface_r = Fonts.getFace("quote", label_size)
+        local qlh_r = math.floor((1 + 0.3) * qface_r.size + 0.5)
+        quote_reserve = M.getQuoteMaxLines() * qlh_r + text_block_gap
+    end
+    local cover_max_h = math.max(S(80), content_bottom - cover_top - text_h - (quote_reserve > 0 and 0 or text_block_gap) - shadow_off - quote_reserve
+                                 - (strip_h > 0 and (strip_h + S(12)) or 0))
     local cover_restore = wallpaper_bg and Wallpaper.restore or nil
     local cover, cover_w, cover_h = buildCover(card, left_w - shadow_off, cover_max_h, pal, shadow_off, cover_restore)
 
-    -- Now that the cover's real on-screen width is known, rebuild the
-    -- title/author/series/quote stack narrow enough that it never reaches
-    -- further right than the cover itself does - its drop shadow included,
-    -- when the shadow is shown, since that's how far right the cover
-    -- actually, visibly extends. (This doesn't change text_h/cover_max_h
-    -- above: see buildTextBlocks - block heights don't depend on width.)
-    --
-    -- With no backdrop panel behind the text (plain background, or a
-    -- transparent/"Off" wallpaper panel), the text itself IS the box, so it
-    -- can run all the way out to cover_reach_w. But when a backdrop panel
-    -- IS showing (individual per-line panels, or one shared "grouped"
-    -- panel), that panel adds TEXT_BACKDROP_PAD_H of its own padding on
-    -- both sides on top of the text - so if the text were allowed to reach
-    -- all the way to cover_reach_w, the PANEL's right edge would stick out
-    -- past the cover (+ shadow) by that padding. Shave that padding off the
-    -- available width here so the panel's edges - not just the bare text -
-    -- line up with where the cover visibly starts/ends.
-    local cover_reach_w = cover_w + (show_cover_shadow and shadow_off or 0)
-    local text_max_w = cover_reach_w - (backdrop_active and 2 * TEXT_BACKDROP_PAD_H or 0)
-    text_blocks, quote_index = buildTextBlocks(text_max_w)
+    -- Progress strip, exactly as wide as the cover, two lines on one grid:
+    --   chapter read/total (left) | book read/total (left)
+    --   [chapter bar] chapter %   | [book bar] book %
+    local strip
+    if strip_h > 0 then
+        local inset = backdrop_active and TEXT_BACKDROP_PAD_H or 0
+        local strip_w = cover_w - 2 * inset            -- as wide as the cover
+        local sep_w = S(20)
+        local half_w = math.floor((strip_w - sep_w) / 2)
+        -- Shrink the font until both page-count texts fit their half.
+        local face, size = strip_face, strip_size
+        while size > 4 do
+            local wc = TextWidget:new{ text = strip_ch_txt, face = face }:getSize().w
+            local wb = TextWidget:new{ text = strip_bk_txt, face = face }:getSize().w
+            if math.max(wc, wb) <= half_w then break end
+            size = size - 1
+            face = Fonts.getFaceAt("stat_value", size)
+        end
+        local line_h = math.max(TextWidget:new{ text = "Ag", face = face }:getSize().h, strip_bar_h)
+        -- Line 1 gets a shorter box than its text so the two lines sit close.
+        local trim = math.floor(line_h * 0.2)
+        local function half(widget, h)
+            return LeftContainer:new{ dimen = Geom:new{ w = half_w, h = h or line_h }, widget }
+        end
+        local function sep(h)
+            return CenterContainer:new{
+                dimen = Geom:new{ w = sep_w, h = h or line_h },
+                text("|", face, stat_value_color),
+            }
+        end
+        local function barCell(pct, label)
+            local g = HorizontalGroup:new{ align = "center" }
+            local lw = label and text(label, face, stat_value_color) or nil
+            local gap = lw and S(8) or 0
+            table.insert(g, StatCell.Bar:new{
+                width = math.max(S(20), half_w - (lw and lw:getSize().w or 0) - gap),
+                height = strip_bar_h, percent = pct, color = stat_value_color,
+            })
+            if lw then
+                table.insert(g, HorizontalSpan:new{ width = gap })
+                table.insert(g, lw)
+            end
+            return g
+        end
+        local line1 = HorizontalGroup:new{ align = "center",
+            half(text(strip_ch_txt, face, stat_value_color), line_h - trim), sep(line_h - trim),
+            half(text(strip_bk_txt, face, stat_value_color), line_h - trim) }
+        local line2 = HorizontalGroup:new{ align = "center",
+            half(barCell(strip_ch_pct, tostring(strip_ch_pct) .. "%")), sep(),
+            half(barCell(strip_bk_pct, tostring(strip_bk_pct) .. "%")) }
+        strip = VerticalGroup:new{ align = "left", line1, VerticalSpan:new{ width = strip_line_gap }, line2 }
+    end
 
-    -- Now that the cover's real height is known, spread the statistics rows
-    -- so the LAST one's bottom lines up with the bottom of the cover - or,
-    -- with a backdrop panel showing, so the BOTTOM of that last row's panel
-    -- (TEXT_BACKDROP_PAD_V below its text) lines up with the cover's
-    -- bottom. That bottom includes the drop shadow's own downward reach
-    -- (shadow_off further down than the cover art) whenever it's shown, so
-    -- the statistics line up with how far the cover visibly extends.
+    -- The statistics column spans exactly the height of cover + progress
+    -- strip: top level with the cover, bottom level with the strip's bottom
+    -- (or the cover's own bottom, drop shadow included, with no strip). If
+    -- the rows don't fit at the nominal size, the stat fonts are shrunk step
+    -- by step until they do; any slack is spread evenly between the rows.
     local cover_bottom = cover_top + cover_h + (show_cover_shadow and shadow_off or 0)
+    local strip_y = cover_top + cover_h + shadow_off + S(4)
     local stats_bottom_target = cover_bottom - (backdrop_active and TEXT_BACKDROP_PAD_V or 0)
     local stats_h = math.max(0, stats_bottom_target - stats_top)
-    local cells, cells_h = {}, 0
-    for _idx, row in ipairs(rows) do
-        local cell = StatCell:new{
-            value = row[1], label = row[2], width = right_w,
-            value_face = value_face, label_face = label_face,
-            value_color = stat_value_color, label_color = stat_label_color,
-        }
-        cells[#cells + 1] = cell
-        cells_h = cells_h + cell:getSize().h
+
+    local stat_value_size, stat_label_size = Fonts.getUnitSize("stat_value"), Fonts.getUnitSize("stat_label")
+    local cells, cells_h
+    local function buildCells()
+        local vf = Fonts.getFaceAt("stat_value", stat_value_size)
+        local lf = Fonts.getFaceAt("stat_label", stat_label_size)
+        local w = 0
+        for _idx, row in ipairs(rows) do
+            w = math.max(w,
+                TextWidget:new{ text = row[1], face = vf }:getSize().w,
+                TextWidget:new{ text = row[2], face = lf }:getSize().w)
+        end
+        right_w = math.min(w + S(2), math.floor((W - 2 * pad_x) * 0.6))
+        cells, cells_h = {}, 0
+        for _idx, row in ipairs(rows) do
+            local cell = StatCell:new{
+                value = row[1], label = row[2], width = right_w,
+                value_face = vf, label_face = lf,
+                value_color = stat_value_color, label_color = stat_label_color,
+                bar = row.bar, bar_color = stat_value_color,
+            }
+            cells[#cells + 1] = cell
+            cells_h = cells_h + cell:getSize().h
+        end
+    end
+    buildCells()
+    local shrink_guard = 0
+    while cells_h > stats_h and stat_value_size > 4 and shrink_guard < 60 do
+        stat_value_size = math.max(4, stat_value_size * 0.95)
+        stat_label_size = math.max(3, stat_label_size * 0.95)
+        buildCells()
+        shrink_guard = shrink_guard + 1
+    end
+    -- Column sits a short, fixed distance right of the cover (shadow
+    -- included) instead of being pushed against the right margin.
+    local stats_x = pad_x - (backdrop_active and TEXT_BACKDROP_PAD_H or 0) + cover_w
+                    + (show_cover_shadow and shadow_off or 0) + S(16)
+    stats_x = math.min(stats_x, W - pad_x - right_w)
+    -- Rating: five star icons (filled = rating, outline = the rest; drawn as
+    -- SVG icons so no font needs the star glyphs), in the same row as the
+    -- progress strip below the cover, centred (horizontally and vertically) in the
+    -- box right of the strip. No heading. Size follows the strip's
+    -- height, capped so five stars always fit in the space right of the strip.
+    local rating_cell
+    if Prefs.readBool(M.SETTING_RATING, true) and Prefs.read(M.SETTING_LAYOUT, "side") ~= "centered" then
+        local free_w = W - pad_x - (pad_x + cover_w + (show_cover_shadow and shadow_off or 0)) - S(8)
+        -- Stars follow every text shrink: scaled by how far the stats column's
+        -- fonts had to shrink (ratio < 1 when a tall quote area makes the cover
+        -- smaller), and never taller than the strip as it is really drawn (its
+        -- text shrinks with the cover's width).
+        local star_size
+        if strip and strip:getSize().h > 0 then
+            local ratio = math.min(1, stat_value_size / math.max(1, Fonts.getUnitSize("stat_value")))
+            star_size = math.min(math.floor(strip_h * 0.7 * ratio), math.floor(strip:getSize().h * 0.7))
+        else
+            star_size = S(math.floor(stat_value_size * 1.3))
+        end
+        star_size = math.max(8, math.min(star_size, math.floor(free_w / 5.5)))
+        local stars = HorizontalGroup:new{ align = "center" }
+        local r = math.max(0, math.min(5, math.floor((tonumber(card.rating) or 0) + 0.5)))
+        for i = 1, 5 do
+            local st = icon(i <= r and "star" or "star_outline", star_size, pal)
+            if st then
+                table.insert(stars, st)
+                if i < 5 then table.insert(stars, HorizontalSpan:new{ width = math.floor(star_size * 0.1) }) end
+            end
+        end
+        rating_cell = stars
     end
     local gap = 0
     local stat_y = stats_top
     if #cells > 1 then
         gap = math.max(0, math.floor((stats_h - cells_h) / (#cells - 1)))
     elseif #cells == 1 then
-        -- Nothing to distribute a gap between, so center the single row in
-        -- the space instead of leaving it stuck to the top with the rest
-        -- of the column (down to the cover's bottom) sitting empty.
+        -- Nothing to distribute a gap between, so center the single row.
         stat_y = stats_top + math.max(0, math.floor((stats_h - cells_h) / 2))
     end
     -- Placed one at a time (rather than as a single VerticalGroup) so a
@@ -1394,16 +1773,16 @@ function M.build(card, opts)
     for i, cell in ipairs(cells) do
         if i > 1 then stat_y = stat_y + gap end
         if stats_group then
-            groupAdd(stats_group, cell, W - pad_x - right_w, stat_y)
+            groupAdd(stats_group, cell, stats_x, stat_y)
         else
-            placeText(cell, W - pad_x - right_w, stat_y)
+            placeText(cell, stats_x, stat_y)
         end
         stat_y = stat_y + cell:getSize().h
         -- Separator below this row: centred in the gap to the next one
         -- (nothing to separate from after the last row).
         if rows[i] and rows[i].sep and i < #cells then
             side_sep_lines[#side_sep_lines + 1] = {
-                x = W - pad_x - right_w,
+                x = stats_x,
                 y = stat_y + math.floor(gap / 2),
                 w = right_w,
             }
@@ -1440,6 +1819,35 @@ function M.build(card, opts)
     -- text_blocks list - one flowing block, sharing one backdrop panel in
     -- "grouped" mode.
     local y = cover_top + cover_h + S(20)
+    if strip then
+        placeText(strip, cover_left + (backdrop_active and TEXT_BACKDROP_PAD_H or 0), strip_y)
+        y = strip_y + strip:getSize().h + S(4)
+    end
+    if rating_cell then
+        local rh = rating_cell:getSize().h
+        local sh = strip and strip:getSize().h or rh
+        local ry = strip_y + math.floor((sh - rh) / 2)
+        -- Rating box = the space right of the strip, up to the right margin.
+        local box_x = pad_x + cover_w + (show_cover_shadow and shadow_off or 0)
+        local box_w = W - pad_x - box_x
+        placeText(rating_cell, box_x + math.floor((box_w - rating_cell:getSize().w) / 2), ry)
+        y = math.max(y, ry + rh + S(4))
+    end
+    -- Fit the quote into the space below the header block: only if it would
+    -- run past content_bottom is it rebuilt with fewer lines (never fewer than
+    -- 1 - the quote is cut off with "...", not dropped).
+    if quote_index then
+        local header_bottom = y + text_h
+        local qh = 0
+        for qi = quote_index, #text_blocks do qh = qh + text_blocks[qi]:getSize().h end
+        if header_bottom + text_block_gap + qh > content_bottom then
+            local qface = Fonts.getFace("quote", label_size)
+            local qlh = math.floor((1 + 0.3) * qface.size + 0.5)
+            local fit = math.min(M.getQuoteMaxLines(),
+                math.floor((content_bottom - header_bottom - text_block_gap) / qlh))
+            text_blocks, quote_index = buildTextBlocks(text_max_w, false, true, math.max(1, fit))
+        end
+    end
     local title_group = backdrop_grouped and newGroup() or nil
     for i, block in ipairs(text_blocks) do
         if i > 1 then y = y + gapBefore(i) end

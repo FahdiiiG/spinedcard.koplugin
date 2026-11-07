@@ -58,9 +58,10 @@ local Data    = loadModule("lib/bookdata.lua", { StatsDb = StatsDb, Cache = Cach
 local Colors  = loadModule("lib/colors.lua", { PluginUtil = PluginUtil, Locale = Locale, Prefs = Prefs })
 local Fonts   = loadModule("lib/fonts.lua",  { PluginUtil = PluginUtil, Locale = Locale, Prefs = Prefs })
 local Wallpaper = loadModule("lib/wallpaper.lua", { PluginUtil = PluginUtil, Locale = Locale, Prefs = Prefs })
+local RealBook = loadModule("lib/realbook.lua", { Prefs = Prefs, Locale = Locale })
 local CardView = loadModule("views/card_view.lua", {
     PluginUtil = PluginUtil, Locale = Locale, Prefs = Prefs, Cache = Cache, Colors = Colors, Fonts = Fonts,
-    Wallpaper = Wallpaper,
+    Wallpaper = Wallpaper, RealBook = RealBook,
 })
 local Updater = loadModule("lib/updater.lua", { Locale = Locale, PluginUtil = PluginUtil })
 local About   = loadModule("views/about.lua", { Locale = Locale, Updater = Updater })
@@ -633,6 +634,17 @@ function BookCard:addToMainMenu(menu_items)
     streak.text = _("Show reading streak")
     local rtype = toggleSetting(CardView.SETTING_READER_TYPE, true)
     rtype.text = _("Show reader type")
+    local pstrip = toggleSetting(CardView.SETTING_PROGRESS_STRIP, true)
+    pstrip.text = _("Show progress under cover")
+    local rating_toggle = toggleSetting(CardView.SETTING_RATING, true)
+    rating_toggle.text = _("Show rating")
+    -- "Real book cover" submenu (lib/realbook.lua): on/off, spine, cover shape,
+    -- page lines and the progress bookmark.
+    local realbook_menu = RealBook.buildMenu({
+        enabled_key = CardView.SETTING_REAL_BOOK,
+        text_key = CardView.SETTING_SPINE_TEXT,
+        getTextMode = CardView.getSpineTextMode,
+    })
     local rounded = toggleSetting(CardView.SETTING_ROUNDED, true)
     rounded.text = _("Rounded cover corners")
     local quote_toggle = toggleSetting(CardView.SETTING_QUOTE, false)
@@ -655,6 +667,57 @@ function BookCard:addToMainMenu(menu_items)
             keep_menu_open = true,
         }
     end
+    -- "Custom": type any number; anything above the maximum becomes the maximum.
+    quote_lines.sub_item_table[#quote_lines.sub_item_table + 1] = {
+        text_func = function()
+            local n = CardView.getQuoteMaxLines()
+            local label = _("Custom") .. " (1-" .. CardView.QUOTE_LINES_MAX .. ")"
+            if n > CardView.QUOTE_LINES_OPTIONS[#CardView.QUOTE_LINES_OPTIONS] then
+                label = label .. ": " .. n
+            end
+            return label
+        end,
+        radio = true,
+        checked_func = function()
+            return CardView.getQuoteMaxLines() > CardView.QUOTE_LINES_OPTIONS[#CardView.QUOTE_LINES_OPTIONS]
+        end,
+        keep_menu_open = true,
+        callback = function(touchmenu_instance)
+            local InputDialog = require("ui/widget/inputdialog")
+            local dlg
+            dlg = InputDialog:new{
+                title      = _("Maximum quote lines"),
+                input      = tostring(CardView.getQuoteMaxLines()),
+                input_type = "number",
+                input_hint = "1-" .. CardView.QUOTE_LINES_MAX,
+                description = _("Values above the maximum are set to the maximum."),
+                buttons = {{
+                    {
+                        text     = _("Cancel"),
+                        id       = "close",
+                        callback = function() UIManager:close(dlg) end,
+                    },
+                    {
+                        text             = _("Save"),
+                        is_enter_default = true,
+                        callback         = function()
+                            local n = tonumber(dlg:getInputText())
+                            UIManager:close(dlg)
+                            if n then
+                                n = math.max(1, math.min(CardView.QUOTE_LINES_MAX, math.floor(n)))
+                                Prefs.save(CardView.SETTING_QUOTE_LINES, n)
+                            end
+                            if touchmenu_instance and touchmenu_instance.updateItems then
+                                touchmenu_instance:updateItems()
+                            end
+                        end,
+                    },
+                }},
+            }
+            UIManager:show(dlg)
+            dlg:onShowKeyboard()
+        end,
+    }
     local quote = {
         text = _("Highlighted quote"),
         sub_item_table = { quote_toggle, quote_lines },
@@ -698,7 +761,7 @@ function BookCard:addToMainMenu(menu_items)
                 -- separator line, "Reading goal settings") sit directly in this
                 -- menu instead of in a "Statistics" submenu of their own.
                 sub_item_table_func = function()
-                    local items = { battery, streak, rtype, quote }
+                    local items = { battery, streak, rtype, pstrip, rating_toggle, realbook_menu, quote }
                     for _i, item in ipairs(CardView.buildStatisticsMenu()) do
                         items[#items + 1] = item
                     end

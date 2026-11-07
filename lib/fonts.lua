@@ -76,7 +76,7 @@ local DEFAULT_NAME = {
     title      = "NotoSans-Bold.ttf",
     author     = "NotoSans-Regular.ttf",
     series     = "NotoSans-Bold.ttf",
-    quote      = "NotoSans-Italic.ttf",
+    quote      = "NotoSans-Regular.ttf",
     stat_value = "NotoSans-Bold.ttf",
     stat_label = "NotoSans-Regular.ttf",
     bottom     = "NotoSans-Regular.ttf",
@@ -173,9 +173,20 @@ end
 -- G_reader_settings on every single card draw. Invalidated whenever the
 -- relevant font setting changes (setName/setSize/resetToDefault above).
 local _face_cache = {}
+local _at_cache = {}
 
 function M._invalidate(key)
     _face_cache[key] = nil
+    _at_cache = {}
+end
+
+-- The size (in KOReader units) a role really renders at: the user's custom
+-- size, else the role's fixed default. NOTE: getFace()'s `resolved_size`
+-- argument is ignored whenever either exists - i.e. always - so code that
+-- wants to render a role SMALLER than that (shrink-to-fit) must use
+-- getFaceAt() below, starting from this size.
+function M.getUnitSize(key)
+    return M.getSize(key) or DEFAULT_SIZE[key] or SPINNER_START_SIZE[key] or 14
 end
 
 -- Tries the requested font (file name or Font.fontmap key) at the given
@@ -189,6 +200,25 @@ local function buildFace(font, size)
     if ok and face then return face end
 
     return Font:getFace("cfont", size)
+end
+
+-- Face for a specific font file (e.g. "NotoSans-BoldItalic.ttf") at a size,
+-- falling back to NotoSans-Regular if the file is missing.
+function M.getFaceByName(font, size)
+    size = math.max(3, math.floor((tonumber(size) or 14) + 0.5))
+    local ck = "name:" .. font .. "@" .. size
+    if not _at_cache[ck] then _at_cache[ck] = buildFace(font, size) end
+    return _at_cache[ck]
+end
+
+-- Face for a role's font at an EXPLICIT size (units), ignoring the role's
+-- configured size - for shrink-to-fit. Down to 3 units (getFace's floor is 6).
+function M.getFaceAt(key, size)
+    local name = M.getName(key) or DEFAULT_NAME[key]
+    size = math.max(3, math.floor((tonumber(size) or 14) + 0.5))
+    local ck = name .. "@" .. size
+    if not _at_cache[ck] then _at_cache[ck] = buildFace(name, size) end
+    return _at_cache[ck]
 end
 
 -- `resolved_size` is card_view.lua's own dynamically-computed size for this

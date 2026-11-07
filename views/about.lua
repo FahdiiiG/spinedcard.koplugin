@@ -48,7 +48,7 @@ local deps = ...
 local Locale, Updater = deps.Locale, deps.Updater
 local _ = Locale._
 
-local GITHUB_URL = "https://github.com/peterboda236/bookcard.koplugin"
+local GITHUB_URL = "https://github.com/FahdiiiG/spinedcard.koplugin"   -- set by finalize.sh
 
 local TITLE_SIZE = 22
 local BODY_SIZE  = 15

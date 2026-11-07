@@ -52,6 +52,8 @@ card fields:
   started_ts, last_read_ts, finished_date
   streak_days, streak_weeks, hour_bucket, book_id
   highlights_count
+  quote_texts    a random-order pool of up to 25 highlighted quotes (the card fills its quote lines from it)
+  quote_chapters chapter NAME of each pooled quote (false where unknown), quote_orders its position in the book
   quote_text     one random highlighted quote for this book, re-picked every
                  time the card is (re)built (collectLive/collectFromFile/
                  prepare) - nil if the book has no highlights with text
@@ -205,31 +207,44 @@ end
 -- entries that actually carry highlighted text, since a random EMPTY
 -- "quote" would be worse than showing none.
 local function collectHighlightTexts(ds)
-    local texts = {}
-    local function add(raw)
+    local texts, chaps = {}, {}      -- chaps[i] = chapter title of texts[i] (or nil)
+    local function add(raw, chapter)
         if type(raw) ~= "string" then return end
         local trimmed = raw:match("^%s*(.-)%s*$")
-        if trimmed ~= "" then texts[#texts + 1] = trimmed end
+        if trimmed ~= "" then
+            texts[#texts + 1] = trimmed
+            chaps[#texts] = type(chapter) == "string" and chapter or nil
+        end
     end
 
     local annotations = ds:readSetting("annotations")
     if type(annotations) == "table" then
         for _, item in ipairs(annotations) do
-            if type(item) == "table" and item.drawer then add(item.text) end
+            if type(item) == "table" and item.drawer then add(item.text, item.chapter) end
         end
-        return texts
+        return texts, chaps
     end
     local highlight = ds:readSetting("highlight")
     if type(highlight) == "table" then
-        for _, items in pairs(highlight) do
+        -- Walk the pages in ascending order, so the index of each text is its
+        -- position in the book (the card shows several quotes in that order).
+        local pages = {}
+        for page in pairs(highlight) do pages[#pages + 1] = page end
+        table.sort(pages, function(x, y)
+            local nx, ny = tonumber(x), tonumber(y)
+            if nx and ny then return nx < ny end
+            return tostring(x) < tostring(y)
+        end)
+        for _, page in ipairs(pages) do
+            local items = highlight[page]
             if type(items) == "table" then
                 for _, item in ipairs(items) do
-                    if type(item) == "table" then add(item.text) end
+                    if type(item) == "table" then add(item.text, item.chapter) end
                 end
             end
         end
     end
-    return texts
+    return texts, chaps
 end
 
 -- One random highlighted quote for `ds`, or nil if the book has none.
@@ -250,6 +265,55 @@ local function pickRandomQuote(ds)
         if #pool == 0 then pool = texts end
     end
     return pool[math.random(#pool)]
+end
+
+-- Chapter NAME for a highlight's chapter title, without any chapter number:
+-- "Chapter 7 - Foo" / "7. Foo" / "Chapter 07: Foo" -> "Foo". A title with no
+-- number in front is used as it is; a title that is nothing but a number
+-- ("Chapter 7") is also used as it is, as there is no name to show instead.
+local function chapterLabel(title)
+    if type(title) ~= "string" then return nil end
+    title = title:match("^%s*(.-)%s*$")
+    if title == "" then return nil end
+    local function clean(rest)
+        rest = rest or ""
+        repeat
+            local before = rest
+            rest = rest:gsub("^[%s:%.%-]+", ""):gsub("^\226\128[\147\148]", "")
+        until rest == before
+        return rest
+    end
+    local n, rest = title:match("^[Cc]hapter%s+(%d+)(.*)$")
+    if not n then n, rest = title:match("^(%d+)[%s:%.%-](.*)$") end
+    if n then
+        rest = clean(rest)
+        if rest ~= "" then return rest end
+    end
+    return title
+end
+
+-- A pool of highlighted quotes (random order, at most QUOTE_POOL_MAX) for the
+-- card to pick from, plus a parallel list of "Chapter NN: Name" labels (false
+-- where unknown): with several lines of room it fills them with as many
+-- complete quotes as fit. nil when the book has none.
+local QUOTE_POOL_MAX = 25
+local function pickQuotePool(ds, toc)
+    local ok, texts, chaps = pcall(collectHighlightTexts, ds)
+    if not ok or #texts == 0 then return nil end
+    local order = {}
+    for i = 1, #texts do order[i] = i end
+    for i = #order, 2, -1 do
+        local j = math.random(i)
+        order[i], order[j] = order[j], order[i]
+    end
+    local out_t, out_c, out_o = {}, {}, {}
+    for k = 1, math.min(#order, QUOTE_POOL_MAX) do
+        local i = order[k]
+        out_t[k] = texts[i]
+        out_c[k] = chapterLabel(chaps and chaps[i]) or false
+        out_o[k] = i            -- position in the book (1 = earliest highlight)
+    end
+    return out_t, out_c, out_o
 end
 
 -- The statistics plugin's per-page cap (settings > statistics > max_sec).
@@ -301,11 +365,13 @@ function M.readSidecar(file)
     if type(summary) == "table" then
         sc.status = summary.status
         sc.modified = summary.modified
+        sc.rating = num(summary.rating)   -- KOReader's 1-5 star rating
     end
     sc.md5 = ds:readSetting("partial_md5_checksum")
     sc.props = ds:readSetting("doc_props")
     sc.highlights = countHighlights(ds)
     sc.quote = pickRandomQuote(ds)
+    sc.quotes, sc.quote_chapters, sc.quote_orders = pickQuotePool(ds)
     return sc
 end
 
@@ -760,6 +826,7 @@ function M.collectLive(ui)
     if type(summary) == "table" then
         card.status = summary.status
         card.finished_date = summary.modified
+        card.rating = num(summary.rating)
     end
 
     -- Pages left / time left: the same call and page number Reading Insights uses.
@@ -785,12 +852,27 @@ function M.collectLive(ui)
         end
     end
 
+    -- Chapter pages read / total (current page counts as read, like the
+    -- book's "current / total"), for the progress strip. Live document with
+    -- a usable TOC only; nil otherwise (the card view then falls back to the
+    -- whole-book numbers).
+    if ui.toc and ui.toc.getChapterPageCount and ui.toc.getChapterPagesDone then
+        local ok_t, ch_total = pcall(ui.toc.getChapterPageCount, ui.toc, pageno)
+        local ok_d, ch_done = pcall(ui.toc.getChapterPagesDone, ui.toc, pageno)
+        ch_total, ch_done = ok_t and num(ch_total), ok_d and num(ch_done)
+        if ch_total and ch_total > 0 and ch_done then
+            card.chapter_pages_total = ch_total
+            card.chapter_pages_read = math.min(ch_total, ch_done + 1)
+        end
+    end
+
     -- Highlight count + a random quote: from the live, in-memory settings
     -- (most current).
     if ui.doc_settings then
         local ok_hl, hl = pcall(countHighlights, ui.doc_settings)
         if ok_hl then card.highlights_count = hl end
         card.quote_text = pickRandomQuote(ui.doc_settings)
+        card.quote_texts, card.quote_chapters, card.quote_orders = pickQuotePool(ui.doc_settings)
     end
 
     local book_id = stats and stats.id_curr_book
@@ -837,8 +919,12 @@ function M.collectFromFile(file, ui)
     card.percent = sc.percent
     card.status = sc.status
     card.finished_date = sc.modified
+    card.rating = sc.rating
     card.highlights_count = sc.highlights
     card.quote_text = sc.quote
+    card.quote_texts = sc.quotes
+    card.quote_chapters = sc.quote_chapters
+    card.quote_orders = sc.quote_orders
 
     StatsDb.withDb(nil, function(conn)
         local book_id = findBookId(conn, file, sc, props.title, props.authors)
@@ -875,11 +961,15 @@ function M.prepare(card)
         if not card.percent and sc.percent then card.percent = sc.percent end
         if sc.status then card.status = sc.status end
         if sc.modified then card.finished_date = sc.modified end
+        card.rating = sc.rating   -- always re-read: it can be cleared
         if sc.highlights then card.highlights_count = sc.highlights end
         -- Re-picked every time (not "if sc.quote then"): a book that lost
         -- its last highlight since the previous snapshot should lose its
         -- quote too, and a fresh pick is exactly what "random" means here.
         card.quote_text = sc.quote
+        card.quote_texts = sc.quotes
+        card.quote_chapters = sc.quote_chapters
+        card.quote_orders = sc.quote_orders
     end
     -- The snapshot is taken in onCloseDocument, which runs BEFORE the
     -- statistics plugin writes the last page (its own onCloseDocument does

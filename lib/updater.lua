@@ -39,7 +39,7 @@ local _ = Locale._
 
 -- Releases must carry a .zip asset whose single top-level folder is
 -- bookcard.koplugin.
-local GITHUB_REPO = "peterboda236/bookcard.koplugin"
+local GITHUB_REPO = "FahdiiiG/spinedcard.koplugin"   -- set by finalize.sh
 local PLUGIN_ID    = "bookcard.koplugin"
 local UA_PRODUCT   = "KOReader-BookCard"
 
@@ -48,6 +48,7 @@ local Updater = {}
 --- True once GITHUB_REPO has been filled in.
 function Updater.isConfigured()
     return GITHUB_REPO ~= nil and GITHUB_REPO ~= ""
+        and not GITHUB_REPO:find("FahdiiiG", 1, true)
 end
 
 local function notConfigured()

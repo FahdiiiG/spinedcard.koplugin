@@ -31,5 +31,5 @@ return {
     name = "bookcard",
     fullname = _("Book card"),
     description = pickDescription(),
-    version = "1.7.8",
+    version = "1.0.0",
 }
