@@ -47,8 +47,11 @@ local Updater = {}
 
 --- True once GITHUB_REPO has been filled in.
 function Updater.isConfigured()
+    -- The placeholder is written as two pieces on purpose: finalize.sh replaces
+    -- every literal copy of it in this file, which would otherwise rewrite this
+    -- check too and make it fail for the real repository name.
     return GITHUB_REPO ~= nil and GITHUB_REPO ~= ""
-        and not GITHUB_REPO:find("FahdiiiG", 1, true)
+        and not GITHUB_REPO:find("YOUR_GITHUB" .. "_USERNAME", 1, true)
 end
 
 local function notConfigured()
